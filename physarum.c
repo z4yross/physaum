@@ -7,33 +7,60 @@
 
 
 typedef struct{
-    int x;
-    int y;
+    float x;
+    float y;
     float angle;
 } Agent;
 
+const int WIDTH = 1920;
+const int HEIGHT = 1080;
 
 GLFWwindow* window;
 
 const double PI = 3.14159265358979323846;
+
 const int diffK = 3;
-const int nAgentes = 50;
-const int SO = 6;
-const int SS = 3;
+const float p = 0.15;
+int nAgentes = (int) (WIDTH * HEIGHT * p);
+// int nAgentes = 5;
+const int SO = 9;
+const int SS = 1;
 const float SA = 22.5;
 const float RA = 45.0;
+const float QV = 0.1;
+const float ES = 0.01;
+const int SW = 1;
 
-int WIDTH = 0;
-int HEIGHT = 0;
+const float dt = 0.5;
+
+
 
 Agent *agents;
 float *trail;
+
+
+float hash(unsigned int x){
+    x ^= 2747636419;
+    x *= 2747636419;
+    x ^= x >> 16;
+    x *= 2747636419;
+    x ^= x >> 16;
+    x *= 2747636419;
+    // x = ((x >> 16) ^ x) * 0x45d9f3b;
+    // x = ((x >> 16) ^ x) * 0x45d9f3b;
+    // x = (x >> 16) ^ x;
+    return x / 4294967295.0;
+}
 
 int mod (int a, int b){
    int ret = a % b;
    if(ret < 0)
      ret+=b;
    return ret;
+}
+
+float lerp(float a, float b, float f) {
+    return (a * (1.0 - f)) + (b * f);
 }
 
 float *kernel(float *out){
@@ -50,58 +77,65 @@ float *kernel(float *out){
                     int index = x * HEIGHT + y;
 
                     if(x >= 0 && x < WIDTH && y >= 0 && y < HEIGHT){
-                        // printf("S f(%d, %d) k(%d, %d) | (%d, %d) => %d\n", i, j, k, l, x, y, index);
                         sum += out[index];
                     } 
-                    // else printf("N f(%d, %d) k(%d, %d) | (%d, %d) => %d\n", i, j, k, l, x, y, index);
                 }
             }
+
             // printf("-----------------------\n");
-            out[i * HEIGHT + j] = sum / 9;
+            // out[i * HEIGHT + j] = sum / 9.0;
+
+            float ov = out[i * HEIGHT + j];
+            float br = sum / 9.0;
+            float dv = lerp(ov, br, QV * dt);
+            float dev = fmax(0, dv - ES * dt);
+
+
+            out[i * HEIGHT + j] = dev;
         }
     }
     return out;
 }
 
-float h(unsigned int x){
-    x = ((x >> 16) ^ x) * 0x45d9f3b;
-    x = ((x >> 16) ^ x) * 0x45d9f3b;
-    x = (x >> 16) ^ x;
-    return x / 4294967295.0;
-}
 
-Agent sense(Agent a){
-    float rad = a.angle * PI / 180;
-    float sARad = SA * PI / 180;
+float sense(Agent a, float angle){
+    float rad = (a.angle + angle) * PI / 180;
 
-    int fLX = a.x + SO * (int) cos(rad - SA);
-    int fLY = a.y + SO * (int) sin(rad - SA);
+    float sdX = cos(rad);
+    float sdY = sin(rad);
 
-    int fX = a.x + SO * (int) cos(rad);
-    int fY = a.y + SO * (int) sin(rad);
+    int sCX = a.x + SO * cos(rad);
+    int sCY = a.y + SO * sin(rad);
 
-    int fRX = a.x + SO * (int) cos(rad + SA);
-    int fRY = a.y + SO * (int) sin(rad + SA);
+    float sum = 0;
+    
+    // glColor4f(0,0,1,1);
+    // glPointSize(1.0);
 
+    // glBegin(GL_POINTS);
+    
 
+    for(int i = -SW; i <= SW; i++){
+        for(int j = -SW; j <= SW ; j++){
+            int pX = sCX + i;
+            int pY = sCY + j;
 
-    if(fLX >= 0 && fLX < WIDTH && fLY >= 0 && fLY < HEIGHT && 
-        fX >= 0 && fX < WIDTH && fY >= 0 && fY < HEIGHT && 
-        fRX >= 0 && fRX < WIDTH && fRY >= 0 && fRY < HEIGHT){
+            if(pX >= 0 && pX < WIDTH && pY >= 0 && pY < HEIGHT){
 
-        float fl = trail[fLX * HEIGHT + fLY];
-        float f = trail[fX * HEIGHT + fY];
-        float fr = trail[fRX * HEIGHT + fRY];
+                // glVertex2f(pX, pY);
+                // glVertex2f(0, 0);
+                // glVertex2f(WIDTH / 2, HEIGHT / 2);
 
-        if (f > fl && f > fr) a.angle += 0;
-        else if(f <= fl && f <= fr) 
-            if(h(fX * HEIGHT + fY) <= 0.5) a.angle = (int) (a.angle - RA) % 360;
-            else a.angle = (int) (a.angle + RA) % 360;
-        else if(fl < fr) a.angle = (int) (a.angle + RA) % 360;
-        else if(fr < fl) a.angle = (int) (a.angle - RA) % 360;
+                sum += trail[(int) ((int) pX * HEIGHT + (int) pY)];
+            }
+        }
     }
 
-    return a;
+    
+    // glEnd();
+    
+
+    return sum;
 }
 
 
@@ -109,35 +143,23 @@ Agent sense(Agent a){
 Agent move(Agent a, int i){
     float rad = a.angle * PI / 180.0;
 
-    float vx = SS * cos(rad);
-    float vy = SS * sin(rad);
+    float vx = SS * cos(rad) * dt;
+    float vy = SS * sin(rad) * dt;
 
     float px = a.x + vx;
-    float py = a.y + vx;
+    float py = a.y + vy;
 
-    // if (px <= 0){
-    //     vx = -vx;
-    //     a.angle = mod(atan(vy / vx) * 180 / PI, 360);
-    // }if(px >= WIDTH - 1){
-    //     vx = -vx;
-    //     a.angle = mod(atan(vy / vx) * 180 / PI + 180, 360);
-    // } else if(py <= 0){
-    //     vy = -vy;
-    //     if(vx < 0) a.angle = mod(atan(vy / vx) * 180 / PI + 180, 360);
-    //     else a.angle = mod(atan(vy / vx) * 180 / PI, 360);
-    // }
-    // else if(py >= HEIGHT) {
-    //     vy = -vy;
-    //     if(vx < 0) a.angle = mod(atan(vy / vx) * 180 / PI + 180, 360);
-    //     else a.angle = mod(atan(vy / vx) * 180 / PI, 360);
-    
-    // }
-    if(px < WIDTH && px >= 0 && py < HEIGHT && py >= 0){
-        a.x = (int) (a.x + vx);
-        a.y = (int) (a.y + vy);
-        trail[a.x * HEIGHT + a.y] = 1;
+    if(px < 0 || px >= WIDTH || py < 0 || py >= HEIGHT){
+        // a.x = fmin(WIDTH - 0.01, fmax(0, px));
+        // a.y =  fmin(HEIGHT - 0.01, fmax(0, py));
+        a.angle = (int) (hash(random()) * 360);     
+        // a.angle = (int) 0;     
+        
     }else{
-        a.angle = (i  + a.angle + a.x + a.y) * 360;
+        a.x = px;
+        a.y = py;
+        // printf("%d(%f %f %f)\n", i, px, py, a.angle);
+        trail[(int)((int)(px) * HEIGHT + (int)(py))] = 1;
     }    
 
     
@@ -145,76 +167,134 @@ Agent move(Agent a, int i){
 }
 
 void setup(){
-    glfwGetWindowSize(window, &WIDTH, &HEIGHT);
-    glEnable(GL_BLEND);
+    // glfwGetWindowSize(window, &WIDTH, &HEIGHT);
+    // glEnable(GL_BLEND);
     glClearColor(0, 0, 0, 1);
 
+    glViewport(0,0,WIDTH,HEIGHT);
+    
     glMatrixMode(GL_PROJECTION);
-    glOrtho(0.0, WIDTH, HEIGHT , 0.0, -1.0, 1.0);
+    glLoadIdentity();
+    glOrtho(0, WIDTH, HEIGHT, 0, 0, 1);
+
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
 
     //i * height + j
     agents = (Agent*) calloc(nAgentes, sizeof(Agent));
     trail = (float *) calloc(WIDTH * HEIGHT, sizeof(float));
 
+    printf("(%d, %d)",WIDTH, HEIGHT);
+
+    float r = WIDTH / 6;
+    
+
     for(int i = 0; i < nAgentes; i++) {
-        int dx = i % (nAgentes / 2) - nAgentes/ 4;
-        int dy = i / (nAgentes / 2) - nAgentes/ 4;
+        float angle =  hash(random()) * 2 * PI;
+        float x = hash(random()) * r * cos(angle) + WIDTH / 2;
+        float y = hash(random()) * r * sin(angle) + HEIGHT / 2;
+
+        
         Agent a;
-        a.x = WIDTH / 2 + dx;
-        a.y = HEIGHT / 2 + dy;
-        // a.angle = 45;
-        a.angle = (int) (h(i) * 360) % 360;
+
+        a.x = x;
+        a.y = y;
+        a.angle = angle * 180 / PI;
+
+        // a.x = WIDTH / 2;
+        // a.y = HEIGHT / 2;
+        // // a.angle = 45;
+        // a.angle = (int) (hash(random()) * 360);
         agents[i] = a;
     }
 }
 
 void draw(){
+    trail = kernel(trail);
+
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    glOrtho(0, WIDTH, HEIGHT, 0, 0, 1);
+
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+
+    glPointSize(1.0);
+    glBegin(GL_POINTS);
+    
+    for(int i = 0; i < WIDTH; i++){
+        for(int j = 0; j < HEIGHT; j++){
+            float c = trail[i * HEIGHT + j];
+            
+            glColor4f(c, c, c, 1);
+            glVertex2f(i, j);    
+            trail[i * HEIGHT + j] = fmax(0, c - ES * dt);        
+        }
+    }
     
 
-    trail = kernel(trail);
+    glEnd();
+ 
+
+    // glMatrixMode(GL_PROJECTION);
+    // glLoadIdentity();
+    // glOrtho(0, WIDTH, HEIGHT, 0, 0, 1);
+
+    // glMatrixMode(GL_MODELVIEW);
+    // glLoadIdentity();
 
     for(int i = 0; i < nAgentes; i++){
         // Agent a = agents[i];    
         agents[i] = move(agents[i], i);
-        // agents[i] = sense(agents[i]);
+
+        float f = sense(agents[i], 0);
+        float fl = sense(agents[i], SA);
+        float fr = sense(agents[i], -SA);
+
+        float rs = hash(rand());
+        float ra = rs * RA * dt;
+
+        if (f > fl && f > fr) agents[i].angle += 0;
+        else if(f < fl && f < fr) 
+            if(rand() <= 0.5) agents[i].angle = (int) (agents[i].angle - ra);
+            else agents[i].angle = (int) (agents[i].angle + ra);
+        else if(fl < fr) agents[i].angle = (int) (agents[i].angle - ra);
+        else if(fr < fl) agents[i].angle = (int) (agents[i].angle + ra);        
     }
+    
 
-    glPointSize(10.0);
-    glBegin(GL_POINTS);
-
-    for(int i = 0; i < WIDTH; i++){
-        for(int j = 0; j < HEIGHT; j++){
-            // trail[i * HEIGHT + j] -= 0.001;
-            float c = trail[i * HEIGHT + j];
-
-            glColor4f(c, c, c, 1.0);
-            glVertex2f(i, j);
-
-
-            
-        }
-    }
-
-    glEnd();
 }
 
 int main(void){
     if (!glfwInit()) return -1;
 
-    window = glfwCreateWindow(1000, 500, "physarum", NULL, NULL);
+    window = glfwCreateWindow(WIDTH, HEIGHT, "physarum", NULL, NULL);
     if (!window){
         glfwTerminate();
         return -1;
     }
 
     glfwMakeContextCurrent(window);
-
+    // glfwSwapInterval(1);
     setup();
 
     while (!glfwWindowShouldClose(window)){
         glClear(GL_COLOR_BUFFER_BIT);
 
+        // glViewport(0,0,WIDTH,HEIGHT);
+    
+
+
+        
         draw();
+
+        // glColor4f(1,1,1,1);
+        // glPointSize(10.0);
+        // glBegin(GL_POINTS);
+        // glVertex2f(WIDTH, HEIGHT);
+        // glVertex2f(0, 0);
+        // glVertex2f(WIDTH / 2, HEIGHT / 2);
+        // glEnd();
 
         glfwSwapBuffers(window);
         glfwPollEvents();
