@@ -1,7 +1,10 @@
+// make && ./physarum
+
+#include <math.h>
 #include <GLFW/glfw3.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <math.h>
+
 
 typedef struct{
     int x;
@@ -14,7 +17,7 @@ GLFWwindow* window;
 
 const double PI = 3.14159265358979323846;
 const int diffK = 3;
-const int nAgentes = 200;
+const int nAgentes = 50;
 const int SO = 6;
 const int SS = 3;
 const float SA = 22.5;
@@ -25,6 +28,13 @@ int HEIGHT = 0;
 
 Agent *agents;
 float *trail;
+
+int mod (int a, int b){
+   int ret = a % b;
+   if(ret < 0)
+     ret+=b;
+   return ret;
+}
 
 float *kernel(float *out){
     for(int i = 0; i < WIDTH; i++){
@@ -41,16 +51,13 @@ float *kernel(float *out){
 
                     if(x >= 0 && x < WIDTH && y >= 0 && y < HEIGHT){
                         // printf("S f(%d, %d) k(%d, %d) | (%d, %d) => %d\n", i, j, k, l, x, y, index);
-                        sum += out[index] / 9;
+                        sum += out[index];
                     } 
                     // else printf("N f(%d, %d) k(%d, %d) | (%d, %d) => %d\n", i, j, k, l, x, y, index);
-                    
-                    
-                        
                 }
             }
             // printf("-----------------------\n");
-            out[i * HEIGHT + j] = sum;
+            out[i * HEIGHT + j] = sum / 9;
         }
     }
     return out;
@@ -101,25 +108,39 @@ Agent sense(Agent a){
 
 Agent move(Agent a, int i){
     float rad = a.angle * PI / 180.0;
-    int px = round(a.x + SS * cos(rad));
-    int py = round(a.y + SS * sin(rad));
 
-    if(px <= 0 || px >= WIDTH - 1) {
-        a.angle = (int) (acos(-cos(rad)) * 180 / PI) % 360; 
-    } else if (py <= 0 || py >= HEIGHT - 1){
-        a.angle = (int) (asin(-sin(rad)) * 180 / PI) % 360; 
-    } else if (px >= WIDTH - 1 && py >= HEIGHT - 1){
-        a.angle = 225;
-    }
+    float vx = SS * cos(rad);
+    float vy = SS * sin(rad);
 
-    if(px >= 0 && px < WIDTH && py >= 0 && py < HEIGHT){
-        a.x = px;
-        a.y = py;
+    float px = a.x + vx;
+    float py = a.y + vx;
+
+    // if (px <= 0){
+    //     vx = -vx;
+    //     a.angle = mod(atan(vy / vx) * 180 / PI, 360);
+    // }if(px >= WIDTH - 1){
+    //     vx = -vx;
+    //     a.angle = mod(atan(vy / vx) * 180 / PI + 180, 360);
+    // } else if(py <= 0){
+    //     vy = -vy;
+    //     if(vx < 0) a.angle = mod(atan(vy / vx) * 180 / PI + 180, 360);
+    //     else a.angle = mod(atan(vy / vx) * 180 / PI, 360);
+    // }
+    // else if(py >= HEIGHT) {
+    //     vy = -vy;
+    //     if(vx < 0) a.angle = mod(atan(vy / vx) * 180 / PI + 180, 360);
+    //     else a.angle = mod(atan(vy / vx) * 180 / PI, 360);
+    
+    // }
+    if(px < WIDTH && px >= 0 && py < HEIGHT && py >= 0){
+        a.x = (int) (a.x + vx);
+        a.y = (int) (a.y + vy);
         trail[a.x * HEIGHT + a.y] = 1;
-    }
+    }else{
+        a.angle = (i  + a.angle + a.x + a.y) * 360;
+    }    
 
-
-    // printf("%d (%d %d %f) (%f %f)\n",i, a.x, a.y, a.angle, cos(rad), sin(rad));
+    
     return a;
 }
 
@@ -129,7 +150,7 @@ void setup(){
     glClearColor(0, 0, 0, 1);
 
     glMatrixMode(GL_PROJECTION);
-    glOrtho(0.0, WIDTH, HEIGHT, 0.0, 100, -100);
+    glOrtho(0.0, WIDTH, HEIGHT , 0.0, -1.0, 1.0);
 
     //i * height + j
     agents = (Agent*) calloc(nAgentes, sizeof(Agent));
@@ -153,38 +174,34 @@ void draw(){
     trail = kernel(trail);
 
     for(int i = 0; i < nAgentes; i++){
-        Agent a = agents[i];    
+        // Agent a = agents[i];    
         agents[i] = move(agents[i], i);
         // agents[i] = sense(agents[i]);
     }
 
-    glPointSize(1.0);
+    glPointSize(10.0);
     glBegin(GL_POINTS);
 
     for(int i = 0; i < WIDTH; i++){
         for(int j = 0; j < HEIGHT; j++){
-            trail[i * HEIGHT + j] -= 0.001;
+            // trail[i * HEIGHT + j] -= 0.001;
             float c = trail[i * HEIGHT + j];
 
             glColor4f(c, c, c, 1.0);
             glVertex2f(i, j);
+
+
             
         }
     }
 
     glEnd();
-
-
-
-    // glBegin(GL_POINTS);
-    //     glVertex2f(x, y);
-    // glEnd();
 }
 
 int main(void){
     if (!glfwInit()) return -1;
 
-    window = glfwCreateWindow(1000, 1000, "physarum", NULL, NULL);
+    window = glfwCreateWindow(1000, 500, "physarum", NULL, NULL);
     if (!window){
         glfwTerminate();
         return -1;
