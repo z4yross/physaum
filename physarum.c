@@ -2,41 +2,50 @@
 
 #include <math.h>
 #include <GLFW/glfw3.h>
-#include <stdio.h>
-#include <stdlib.h>
+#include "Array.c"
 
-
-typedef struct{
-    float x;
-    float y;
-    float angle;
-} Agent;
-
-const int WIDTH = 1920;
-const int HEIGHT = 1080;
 
 GLFWwindow* window;
+
+const int WIDTH = 200;
+const int HEIGHT = 200;
 
 const double PI = 3.14159265358979323846;
 
 const int diffK = 3;
 const float p = 0.15;
-int nAgentes = (int) (WIDTH * HEIGHT * p);
-// int nAgentes = 5;
-const int SO = 9;
+
+int nAgentes;
+
+const int SO = 5;
 const int SS = 1;
-const float SA = 22.5;
+const int SW = 1;
+const float SA = 45.0;
+
 const float RA = 45.0;
+
 const float QV = 0.1;
 const float ES = 0.01;
-const int SW = 1;
 
-const float dt = 0.5;
+const float QVT = 0.8;
+const float EST = 0.2;
 
+const float TW = 9;
+const int TD = 1;
 
+const float dt = 1;
 
-Agent *agents;
+Array agents;
+// Agent *agents;
 float *trail;
+float *ftrail;
+int *food;
+
+int leftButton;
+int rightButton;
+int begin = 0;
+double cursorX;
+double cursorY;
 
 
 float hash(unsigned int x){
@@ -68,6 +77,7 @@ float *kernel(float *out){
         for(int j = 0; j < HEIGHT; j++){
 
             float sum = 0.0;
+            float sum2 = 0.0;
 
             for(int k = -diffK / 2; k <= diffK / 2; k++){
                 for(int l = -diffK / 2; l <= diffK / 2; l++){
@@ -78,6 +88,7 @@ float *kernel(float *out){
 
                     if(x >= 0 && x < WIDTH && y >= 0 && y < HEIGHT){
                         sum += out[index];
+                        sum2 += ftrail[index];
                     } 
                 }
             }
@@ -90,15 +101,20 @@ float *kernel(float *out){
             float dv = lerp(ov, br, QV * dt);
             float dev = fmax(0, dv - ES * dt);
 
+            float ov2 = ftrail[i * HEIGHT + j];
+            float br2 = sum2 / 9.0;
+            float dv2 = lerp(ov2, br2, QVT * dt);
+            float dev2 = fmax(0, dv2 - EST * dt);
 
             out[i * HEIGHT + j] = dev;
+            ftrail[i * HEIGHT + j] = dev2;
         }
     }
     return out;
 }
 
 
-float sense(Agent a, float angle){
+float sense(Agent a, float angle, int id, float *mv){
     float rad = (a.angle + angle) * PI / 180;
 
     float sdX = cos(rad);
@@ -114,7 +130,6 @@ float sense(Agent a, float angle){
 
     // glBegin(GL_POINTS);
     
-
     for(int i = -SW; i <= SW; i++){
         for(int j = -SW; j <= SW ; j++){
             int pX = sCX + i;
@@ -125,8 +140,14 @@ float sense(Agent a, float angle){
                 // glVertex2f(pX, pY);
                 // glVertex2f(0, 0);
                 // glVertex2f(WIDTH / 2, HEIGHT / 2);
+                float tV = trail[(int) ((int) pX * HEIGHT + (int) pY)];
+                float ftV = ftrail[(int) ((int) pX * HEIGHT + (int) pY)];
+                sum += tV + ftV * TW; 
 
-                sum += trail[(int) ((int) pX * HEIGHT + (int) pY)];
+                if (ftV > 0){
+                    agents.array[id].trail = TD;
+                    *mv = fmax(*mv, ftV);
+                }
             }
         }
     }
@@ -149,7 +170,7 @@ Agent move(Agent a, int i){
     float px = a.x + vx;
     float py = a.y + vy;
 
-    if(px < 0 || px >= WIDTH || py < 0 || py >= HEIGHT){
+    if(pow(px - 100.0, 2) + pow(py - 100.0, 2) > 90.0 * 90.0  || px < 0 || px >= WIDTH || py < 0 || py >= HEIGHT){
         // a.x = fmin(WIDTH - 0.01, fmax(0, px));
         // a.y =  fmin(HEIGHT - 0.01, fmax(0, py));
         a.angle = (int) (hash(random()) * 360);     
@@ -159,11 +180,97 @@ Agent move(Agent a, int i){
         a.x = px;
         a.y = py;
         // printf("%d(%f %f %f)\n", i, px, py, a.angle);
+
+        // if (a.trail > 0)
+            // ftrail[(int)((int)a.x * HEIGHT + (int)(a.y))] = 1; 
+
         trail[(int)((int)(px) * HEIGHT + (int)(py))] = 1;
     }    
 
+    agents.array[i].trail = fmax(0, agents.array[i].trail - 1 * dt);
     
     return a;
+}
+
+void blur(){
+    trail = kernel(trail);
+}
+
+void show(){    
+    glPointSize(1.0);
+    glBegin(GL_POINTS);
+
+    for(int i = 0; i < WIDTH; i++){
+        for(int j = 0; j < HEIGHT; j++){
+            float c = trail[i * HEIGHT + j];
+            
+            glColor4f(c, c, c, 1);
+            // glColor4f(ftrail[i * HEIGHT + j], ftrail[i * HEIGHT + j], ftrail[i * HEIGHT + j], 1);
+
+             
+            // ftrail[i * HEIGHT + j] = fmax(0, ftrail[i * HEIGHT + j] - 1* dt); 
+            float ft = ftrail[i * HEIGHT + j];
+
+            if (food[i * HEIGHT + j]  == 1) ftrail[i * HEIGHT + j] = 10;
+
+            if(ft > 0)
+                glColor4f(ft, 0, ft, 1); 
+            
+            glVertex2f(i, j); 
+            
+            
+
+            // trail[i * HEIGHT + j] = (trail[i * HEIGHT + j]  + ftrail[i * HEIGHT + j]) * 0.1;
+                             
+        }
+    }
+    
+
+    glEnd();
+}
+
+void update(){
+    for(int i = 0; i < agents.used; i++){
+  
+        agents.array[i] = move(agents.array[i], i);
+
+        float mvf = 0;
+        float mvfl = 0;
+        float mvfr = 0;
+
+        float f = sense(agents.array[i], 0, i, &mvf);
+        float fl = sense(agents.array[i], SA, i, &mvfl);
+        float fr = sense(agents.array[i], -SA, i, &mvfr);
+
+        float rs = hash(rand());
+        // float ra = rs * RA * dt;
+        float ra = RA;
+
+        Agent a = agents.array[i];
+
+        if (f > fl && f > fr) {
+            agents.array[i].angle += 0;
+            if(mvf > 0 && a.trail > 0)  ftrail[(int)((int)a.x * HEIGHT + (int)(a.y))] = mvf;
+        }
+        else if(f < fl && f < fr) 
+            if(rand() <= 0.5) {
+                agents.array[i].angle = (int) (agents.array[i].angle - ra);
+                if(mvfr > 0 && a.trail > 0)  ftrail[(int)((int)a.x * HEIGHT + (int)(a.y))] = mvfr;
+            }
+            else {
+                agents.array[i].angle = (int) (agents.array[i].angle + ra);
+                if(mvfl > 0 && a.trail > 0)  ftrail[(int)((int)a.x * HEIGHT + (int)(a.y))] = mvfl;
+            }
+        else if(fl < fr){
+            agents.array[i].angle = (int) (agents.array[i].angle - ra);
+            if(mvfr > 0 && a.trail > 0)  ftrail[(int)((int)a.x * HEIGHT + (int)(a.y))] = mvfr;
+        } 
+        else if(fr < fl){
+            agents.array[i].angle = (int) (agents.array[i].angle + ra);        
+            if(mvfl > 0 && a.trail > 0)  ftrail[(int)((int)a.x * HEIGHT + (int)(a.y))] = mvfl;
+        } 
+        
+    }
 }
 
 void setup(){
@@ -181,88 +288,88 @@ void setup(){
     glLoadIdentity();
 
     //i * height + j
-    agents = (Agent*) calloc(nAgentes, sizeof(Agent));
+    // agents = (Agent*) calloc(nAgentes, sizeof(Agent));
     trail = (float *) calloc(WIDTH * HEIGHT, sizeof(float));
+    ftrail = (float *) calloc(WIDTH * HEIGHT, sizeof(float));
+    food = (int *) calloc(WIDTH * HEIGHT, sizeof(int));
+    initArray(&agents, 5);
 
     printf("(%d, %d)",WIDTH, HEIGHT);
 
     float r = WIDTH / 6;
     
-
+    nAgentes = WIDTH * HEIGHT * p;
     for(int i = 0; i < nAgentes; i++) {
-        float angle =  hash(random()) * 2 * PI;
-        float x = hash(random()) * r * cos(angle) + WIDTH / 2;
-        float y = hash(random()) * r * sin(angle) + HEIGHT / 2;
-
-        
+        // float angle =  hash(random()) * 2 * PI;
+        // float x = hash(random()) * r * cos(angle) + WIDTH / 2;
+        // float y = hash(random()) * r * sin(angle) + HEIGHT / 2;
+   
         Agent a;
 
-        a.x = x;
-        a.y = y;
-        a.angle = angle * 180 / PI;
+        // a.x = x;
+        // a.y = y;
+        // a.angle = angle * 180 / PI;
+        // a.trail = 0;
 
-        // a.x = WIDTH / 2;
-        // a.y = HEIGHT / 2;
-        // // a.angle = 45;
-        // a.angle = (int) (hash(random()) * 360);
-        agents[i] = a;
+        a.x = WIDTH / 2  + (hash(random()) * 2 - 1) * WIDTH * 3 / 4;
+        a.y = HEIGHT / 2 + (hash(random()) * 2 - 1) * HEIGHT * 3 / 4 ;
+        a.angle = (int) (hash(random()) * 360);
+
+        insertArray(&agents, a);
     }
 }
 
+
 void draw(){
-    trail = kernel(trail);
 
-    glMatrixMode(GL_PROJECTION);
-    glLoadIdentity();
-    glOrtho(0, WIDTH, HEIGHT, 0, 0, 1);
+    if (rightButton == GLFW_PRESS){
+        begin = !begin;
+    }
 
-    glMatrixMode(GL_MODELVIEW);
-    glLoadIdentity();
-
-    glPointSize(1.0);
-    glBegin(GL_POINTS);
-    
-    for(int i = 0; i < WIDTH; i++){
-        for(int j = 0; j < HEIGHT; j++){
-            float c = trail[i * HEIGHT + j];
-            
-            glColor4f(c, c, c, 1);
-            glVertex2f(i, j);    
-            trail[i * HEIGHT + j] = fmax(0, c - ES * dt);        
+    if(leftButton == GLFW_PRESS){
+        if(cursorX < WIDTH && cursorX >= 0 && cursorY < HEIGHT && cursorY >= 0){
+            int i = (int) (cursorX * HEIGHT + cursorY);
+            food[i] = 1;
         }
+
+
+        // if(cursorX < WIDTH && cursorX >= 0 && cursorY < HEIGHT && cursorY >= 0){
+        //     float angle =  hash(random()) * 360;
+        //     Agent a;
+        //     a.x = (float) cursorX;
+        //     a.y = (float) cursorY;
+        //     a.angle = angle * 180 / PI;
+        //     a.trail = 0;
+
+        //     insertArray(&agents, a);
+        // }            
     }
-    
 
-    glEnd();
- 
+    if (begin){
+        blur();
+        show();
+        update();
+    } else {
+        glPointSize(1.0);
+        glBegin(GL_POINTS);
 
-    // glMatrixMode(GL_PROJECTION);
-    // glLoadIdentity();
-    // glOrtho(0, WIDTH, HEIGHT, 0, 0, 1);
-
-    // glMatrixMode(GL_MODELVIEW);
-    // glLoadIdentity();
-
-    for(int i = 0; i < nAgentes; i++){
-        // Agent a = agents[i];    
-        agents[i] = move(agents[i], i);
-
-        float f = sense(agents[i], 0);
-        float fl = sense(agents[i], SA);
-        float fr = sense(agents[i], -SA);
-
-        float rs = hash(rand());
-        float ra = rs * RA * dt;
-
-        if (f > fl && f > fr) agents[i].angle += 0;
-        else if(f < fl && f < fr) 
-            if(rand() <= 0.5) agents[i].angle = (int) (agents[i].angle - ra);
-            else agents[i].angle = (int) (agents[i].angle + ra);
-        else if(fl < fr) agents[i].angle = (int) (agents[i].angle - ra);
-        else if(fr < fl) agents[i].angle = (int) (agents[i].angle + ra);        
+        for(int i = 0; i < WIDTH; i++){
+            for(int j = 0; j < HEIGHT; j++){
+                float c = food[i * HEIGHT + j];
+                
+                glColor4f(c, c, c, 1);
+                glVertex2f(i, j);     
+            }
+        }
+        
+        // for(int i = 0; i < agents.used; i++){
+        //     glColor4f(1, 1, 1, 1);
+        //     glVertex2f(agents.array[i].x, agents.array[i].y); 
+        // }
+        glEnd();
     }
-    
 
+    
 }
 
 int main(void){
@@ -274,32 +381,35 @@ int main(void){
         return -1;
     }
 
+    if (glfwRawMouseMotionSupported() == 0){
+        glfwSetInputMode(window, GLFW_RAW_MOUSE_MOTION, GLFW_TRUE);
+    }
+
     glfwMakeContextCurrent(window);
-    // glfwSwapInterval(1);
     setup();
 
     while (!glfwWindowShouldClose(window)){
+        glMatrixMode(GL_PROJECTION);
+        glLoadIdentity();
+        glOrtho(0, WIDTH, HEIGHT, 0, 0, 1);
+
+        glMatrixMode(GL_MODELVIEW);
+        glLoadIdentity();
+
+        leftButton = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT);
+        rightButton = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT);
+        
         glClear(GL_COLOR_BUFFER_BIT);
 
-        // glViewport(0,0,WIDTH,HEIGHT);
-    
+        glfwGetCursorPos(window, &cursorX, &cursorY);
 
-
-        
         draw();
-
-        // glColor4f(1,1,1,1);
-        // glPointSize(10.0);
-        // glBegin(GL_POINTS);
-        // glVertex2f(WIDTH, HEIGHT);
-        // glVertex2f(0, 0);
-        // glVertex2f(WIDTH / 2, HEIGHT / 2);
-        // glEnd();
 
         glfwSwapBuffers(window);
         glfwPollEvents();
     }
 
+    freeArray(&agents);
     glfwTerminate();
     return 0;
-}
+}2
