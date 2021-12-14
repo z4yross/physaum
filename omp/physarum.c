@@ -4,12 +4,10 @@
 #include <GLFW/glfw3.h>
 #include "Array.c"
 
-#include <sys/time.h>
-
 GLFWwindow *window;
 
-const int WIDTH = 1000;
-const int HEIGHT = 1000;
+const int WIDTH = 200;
+const int HEIGHT = 200;
 
 const double PI = 3.14159265358979323846;
 
@@ -34,6 +32,8 @@ const float EST = 0.2;
 const float TW = 9;
 const int TD = 1;
 
+const int GAP = 1024;
+
 const float dt = 1;
 
 Array agents;
@@ -47,6 +47,14 @@ int rightButton;
 int begin = 0;
 double cursorX;
 double cursorY;
+
+struct argsKernel
+{
+    int idxI;
+    int idxF;
+};
+
+const int CORES = 8;
 
 float hash(unsigned int x)
 {
@@ -75,14 +83,18 @@ float lerp(float a, float b, float f)
     return (a * (1.0 - f)) + (b * f);
 }
 
-float *kernel(float *out)
+void *kernel(void *arg)
 {
-    for (int i = 0; i < WIDTH; i++)
-    {
-        for (int j = 0; j < HEIGHT; j++)
-        {
+    int id = *(int *) arg;
+    int idxI = ((WIDTH * HEIGHT) / CORES) * id ;
+    int idxF = ((WIDTH * HEIGHT) / CORES) * id + (((WIDTH * HEIGHT) / CORES)) - 1;
 
-            float sum = 0.0;
+    for (int idx = idxI; idx < idxF; idx++)
+    {
+        int i = idx % WIDTH;
+        int j = idx / HEIGHT;
+
+        float sum = 0.0;
             float sum2 = 0.0;
 
             for (int k = -diffK / 2; k <= diffK / 2; k++)
@@ -96,8 +108,8 @@ float *kernel(float *out)
 
                     if (x >= 0 && x < WIDTH && y >= 0 && y < HEIGHT)
                     {
-                        sum += out[index];
-                        sum2 += ftrail[index];
+                        sum += trail[index * GAP];
+                        sum2 += ftrail[index * GAP];
                     }
                 }
             }
@@ -105,21 +117,20 @@ float *kernel(float *out)
             // printf("-----------------------\n");
             // out[i * HEIGHT + j] = sum / 9.0;
 
-            float ov = out[i * HEIGHT + j];
+            float ov = trail[(i * HEIGHT + j) * GAP];
             float br = sum / 9.0;
             float dv = lerp(ov, br, QV * dt);
             float dev = fmax(0, dv - ES * dt);
 
-            float ov2 = ftrail[i * HEIGHT + j];
+            float ov2 = ftrail[(i * HEIGHT + j) * GAP];
             float br2 = sum2 / 9.0;
             float dv2 = lerp(ov2, br2, QVT * dt);
             float dev2 = fmax(0, dv2 - EST * dt);
 
-            out[i * HEIGHT + j] = dev;
-            ftrail[i * HEIGHT + j] = dev2;
-        }
+            trail[(i * HEIGHT + j) * GAP] = dev;
+            ftrail[(i * HEIGHT + j) * GAP] = dev2;
     }
-    return out;
+
 }
 
 float sense(Agent a, float angle, int id, float *mv)
@@ -180,7 +191,7 @@ Agent move(Agent a, int i)
     float px = a.x + vx;
     float py = a.y + vy;
 
-    if (pow(px - WIDTH / 2, 2) + pow(py - HEIGHT / 2, 2) > ((WIDTH / 2) * 3 / 4) * ((HEIGHT / 2) * 3 / 4) || px < 0 || px >= WIDTH || py < 0 || py >= HEIGHT)
+    if (pow(px - 100.0, 2) + pow(py - 100.0, 2) > 90.0 * 90.0 || px < 0 || px >= WIDTH || py < 0 || py >= HEIGHT)
     {
         // a.x = fmin(WIDTH - 0.01, fmax(0, px));
         // a.y =  fmin(HEIGHT - 0.01, fmax(0, py));
@@ -206,7 +217,7 @@ Agent move(Agent a, int i)
 
 void blur()
 {
-    trail = kernel(trail);
+    kernel(trail);
 }
 
 void show()
@@ -313,9 +324,9 @@ void setup()
 
     //i * height + j
     // agents = (Agent*) calloc(nAgentes, sizeof(Agent));
-    trail = (float *)calloc(WIDTH * HEIGHT, sizeof(float));
-    ftrail = (float *)calloc(WIDTH * HEIGHT, sizeof(float));
-    food = (int *)calloc(WIDTH * HEIGHT, sizeof(int));
+    trail = (float *)calloc(WIDTH * HEIGHT * GAP, sizeof(float));
+    ftrail = (float *)calloc(WIDTH * HEIGHT * GAP, sizeof(float));
+    food = (int *)calloc(WIDTH * HEIGHT * GAP, sizeof(int));
     initArray(&agents, 5);
 
     printf("(%d, %d)", WIDTH, HEIGHT);
@@ -422,11 +433,6 @@ int main(void)
     glfwMakeContextCurrent(window);
     setup();
 
-    double previousTime = glfwGetTime();
-
-    double sum = 0;
-    int cicles = 0;
-
     while (!glfwWindowShouldClose(window))
     {
         glMatrixMode(GL_PROJECTION);
@@ -447,25 +453,9 @@ int main(void)
 
         glfwSwapBuffers(window);
         glfwPollEvents();
-
-        double currentTime = glfwGetTime();
-        
-        if(begin){
-            double tpc = currentTime - previousTime;
-
-            cicles++;
-            sum += tpc;
-
-            // printf("\r               ");
-            printf("\rtime per cicle: %f", sum / cicles);            
-        }
-
-        previousTime = currentTime;
     }
 
     freeArray(&agents);
     glfwTerminate();
     return 0;
 }
-
-// 0.136594
